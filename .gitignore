@@ -1,7 +1,9 @@
 *
 
 !.gitignore
-!/Linear Regression/linear_regression.py
-!/Linear Regression/linear_regression_gradient.py
+
+!Linear_Regression/
+!Linear_Regression/linear_regression.py
+!Linear_Regression/linear_regression_gradient.py
 
 
