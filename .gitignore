@@ -1,3 +1,7 @@
-/Linear Regression/References
-/Datasets
-__pycache__
+*
+
+!.gitignore
+!/Linear Regression/linear_regression.py
+!/Linear Regression/linear_regression_gradient.py
+
+
