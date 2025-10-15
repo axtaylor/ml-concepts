@@ -1,12 +1,11 @@
-import pandas as pd
 import numpy as np
 from scipy.stats import t as t_dist
 from dataclasses import dataclass, field
 
-    
 @dataclass
 class LinearRegressionOLS:
-    alpha: float = 0.05
+
+    alpha: float = None
     feature_names: list = field(default_factory=list)
     target: str = None
     
@@ -38,41 +37,15 @@ class LinearRegressionOLS:
     ci_low: np.ndarray = field(default=None)
     ci_high: np.ndarray = field(default=None)
     
-
-    def __str__(self) -> str:
+    def __str__(self):
         if self.theta is None:
             return f"LinearRegressionOLS()"
-        return (
-            f"{' '*17}OLS Summary\n"
-            f"{'='*45}\n"
-            f"Target:                           {self.target}\n"
-            f"Features:                         {list(self.feature_names)[1:]}\n"
-            f"R²:                               {self.r_squared:.4f}\n"
-            f"R² Adjusted:                      {self.r_squared_adjusted:.4f}\n"
-            f"F-Statistic:                      {self.f_statistic:.4f}\n\n"
-            f"MSE:                              {self.mse:.4f}\n"
-            f"RMSE:                             {self.rmse:.4f}\n"
-            f"RSS:                              {self.rss:.4f}\n"
-            f"ESS:                              {self.ess:.4f}\n"
-            f"TSS:                              {self.tss:.4f}\n\n"
-            f"Residual Degrees of Freedom:      {self.degrees_freedom}\n"
-            f"Observations:                     {self.X.shape[0]}\n"                    
-            f"Features:                         {self.X.shape[1] - 1}\n\n"
-            f"AIC:                              {self.aic:.4f}\n"     
-            f"BIC:                              {self.bic:.4f}\n"  
-            f"Log likelihood:                   {self.log_likelihood:.4f}\n"          
-            f"{'='*45}\n"
-            f"\n{' '*44}Model Weights"
-            f"\n{'='*100}\n"
-            f"{self.summary().to_string(index=False)}"
-            f"\n{'='*100}\n"
-        )
+        return stargazer(self)
     
-
-    def summary(self) -> pd.DataFrame:
+    def summary(self):
         if self.theta is None:
-            return pd.DataFrame()
-        return pd.DataFrame(
+            return {}
+        return [
         {
             "feature": feature,
             'coefficient': (np.round(coefficient,4) if abs(coefficient) > 0.0001 else np.format_float_scientific(coefficient, precision=2)),
@@ -86,26 +59,17 @@ class LinearRegressionOLS:
         }
         for feature, coefficient, se, t, p, low, high in
         zip(self.feature_names, self.theta, self.std_error_coefficient, self.t_stat_coefficient, self.p_value_coefficient, self.ci_low, self.ci_high)
-    )
-
-
-    '''
-    LinearRegressionOLS.fit(self, y, X, alpha = 0.05)
-
-    Fit the linear regression model on the training data using the closed form ordinary least squares solution.
+    ]
     
-    '''
     def fit(self, y, X, alpha = 0.05):
         self.alpha = alpha
         self.feature_names = X.columns if hasattr(X, 'columns') else [f"Feature {n}" for n in range(0, X.shape[1])]
         self.target = y.name if hasattr(y, 'name') else "Target"
         self.X, self.y = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
         
-        # Compute the coefficients using the normal equation
         xtx_inv = np.linalg.inv(self.X.T @ self.X)
         self.theta = xtx_inv @ (self.X.T @ self.y)                               
 
-        # Assign coefficients and intercept
         self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         
         # Predicted values and residuals
@@ -162,39 +126,22 @@ class LinearRegressionOLS:
         self.ci_high = self.theta + t_crit * self.std_error_coefficient
 
         return self
-    
 
-    '''
-    LinearRegressionOLS.predict(self, X)
 
-    Make a simple prediction for y using a set of X values.
-    
-    '''
     def predict(self, X) -> np.ndarray:
         if self.theta is None:
             raise ValueError("Error: Model is not fitted.")
-        
-        return np.asarray(X, dtype=float) @ self.coefficients + self.intercept
+        return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
     
 
-
-    '''========== Inference Functions =========='''
-
-
-
-    '''
-    LinearRegressionOLS.MarginalPredictions(self, X_test, alpha = 0.05)
-
-    Create model predictions, return a dataframe of prediction statistics for each prediction
-
-    '''
-    def MarginalPredictions(self, X_test, alpha=0.05):
+    
+    def PredictionAnalysis(self, X_test, alpha=0.05):
         if self.theta is None:
             raise ValueError("Error: Model is not fitted.")
 
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], X_test[0])}
 
-        X_test = np.hstack([np.ones((X_test.shape[0], 1)), X_test]) # Add intercept to test set
+        X_test = np.hstack([np.ones((X_test.shape[0], 1)), X_test]) 
         prediction = X_test @ self.theta
 
         se_prediction = np.sqrt((X_test @ self.variance_coefficient @ X_test.T)).item()
@@ -205,7 +152,7 @@ class LinearRegressionOLS:
         t_stat = prediction / se_prediction
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
-        return pd.DataFrame({
+        return ({
             "x__input_vals": [prediction_features],
             "y__prediction": [np.round(prediction.item(), 4)],
             "se__prediction": [np.round(se_prediction,4)],
@@ -215,28 +162,23 @@ class LinearRegressionOLS:
     })
 
 
-    '''
-    LinearRegressionOLS.HypothesisTesting(self, X_test, X_hyp, alpha=0.05)
 
+    '''
     Test the effects of two predictions to determine statistical significance
     Test must be an array of (X) feature values.
     Hypothesis can either be a value for y as a float, or an array of (X) feature values.
-
-    This is effectively the same as MarginalEffects, but with a hypothesis and report component.
-    The functions are split for readability purposes.
-
     '''
-    def HypothesisTesting(self, test, hyp, alpha=0.05):
+    def HypothesisTesting(self, test, hyp, alpha=0.05, critical=1.96):
         # Collecting feature names without constant term
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
 
         hypothesis_features = ({j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])} if isinstance(hyp, np.ndarray) else {"Input Value (y)": f"{hyp}"})
 
-        # Predict the two points (unless X_hyp is given as a float)
-        prediction, hypothesis = self.predict(test), (self.predict(hyp) if isinstance(hyp, np.ndarray) else np.asarray(hyp))
-
         # Add a constant to the first prediction                                                                                  
         test = np.hstack([np.ones((test.shape[0], 1)), test])
+
+        # Predict the two points (unless X_hyp is given as a float)
+        prediction, hypothesis = test @ self.theta, (hyp @ self.theta if isinstance(hyp, np.ndarray) else np.asarray(hyp))
 
         # Standard error of the first prediction     
         se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()  
@@ -254,13 +196,13 @@ class LinearRegressionOLS:
         result = (
             f"\nFail to reject the null hypothesis: {prediction.item():.4f} is not statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
             f"\nConclude that outcome of {prediction_features}\ndoes not differ from {hypothesis_features}"
-            if abs(t_stat.item()) < 1.96 else
+            if abs(t_stat.item()) < critical else
             f"Reject the null hypothesis: {prediction.item():.4f} is statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
             f"Conclude that the outcomes of {prediction_features}\ndiffers significantly from {hypothesis_features}"
         )
-        print(f"Marginal Effects Comparison:\n\nSignificance Analysis (p > |t|)\n1.96 > |{t_stat.item():.4f}| == {abs(t_stat.item()) < 1.96}\n", result)
+        print(f"Marginal Effects Comparison:\n\nSignificance Analysis (p > |t|)\n1.96 > |{t_stat.item():.4f}| == {abs(t_stat.item()) < critical}\n", result)
 
-        return pd.DataFrame({
+        return ({
             "x__prediction_vals": [prediction_features],
             "x__hypothesis_vals": [hypothesis_features],
             "y__prediction": [prediction.item()],
@@ -269,16 +211,10 @@ class LinearRegressionOLS:
             f"ci__prediction_{alpha}": [[np.round(ci_low.item(), 4), np.round(ci_high.item(), 4)]],
             "t_statistic__prediction_hypothesis": [t_stat.item()],
             "p_>_abs_t__prediction_hypothesis": [p.item()],
-    }).T
+    })
 
 
-    '''
-    LinearRegressionOLS.VarianceInflationFactor(self)
 
-    Perform a variance inflation factor check for multicollenearity in the feature set.
-
-    
-    '''
     def VarianceInflationFactor(self):
         if self.theta is None:
             raise ValueError("Error: Model is not fitted.")
@@ -310,11 +246,82 @@ class LinearRegressionOLS:
 
             vif.append(1 / (1 - r_squared_aux) if r_squared_aux < 0.9999 else np.inf)
 
-        return pd.DataFrame({
+        return ({
             'feature': self.feature_names[1:], 
             'VIF': np.round(vif, 4)
     })
 
+
+
+    def RobustStandardError(self, type="HC3"):
+
+        X = self.X
+        n, k = X.shape
+        xtx_inv = np.linalg.inv(X.T @ X)
+        residuals = self.residuals.reshape(-1, 1) # Column vector
+
+        '''
+        #Traditional mathematical approach - Extremely computationally ineffective.
+
+        h = np.diag(X @ xtx_inv @ X.T)
+
+
+        # Compute the scaling for each version
+        if type == "HC0":
+            omega_diag = (residuals.flatten())**2
+        elif type == "HC1":
+            omega_diag = (n / (n - k)) * (residuals.flatten())**2
+        elif type == "HC2":
+            omega_diag = (residuals.flatten()**2) / (1 - h)
+        elif type == "HC3":
+            omega_diag = (residuals.flatten()**2) / ((1 - h)**2)
+        else:
+            raise ValueError("type must be one of: 'HC0', 'HC1', 'HC2', or 'HC3'")
+
+        # Build diagonal omega matrix
+        Omega = np.diag(omega_diag)
+
+        # Compute robust covariance matrix (the "sandwich")
+        robust_cov = xtx_inv @ (X.T @ Omega @ X) @ xtx_inv
+
+        # Robust standard errors
+        robust_se = np.sqrt(np.diag(robust_cov))
+        '''
+
+        # Computationally effective. Build only the diagonal regression matrix.
+
+        h = np.sum(X @ xtx_inv * X, axis=1) # leverage h_ii WITHOUT forming full H = X(X'X)^(-1)X'
+
+        e2 = residuals.flatten()**2 # squared residuals/errors
+
+        if type == "HC0":                   # HC0 uses the squared residuals as the omega
+            omega_diagonal = e2
+        elif type == "HC1":                 # HC1 uses the squared residuals multiplied by degrees freedom correction, small sample bias...
+            omega_diagonal = (n/(n - k))*e2
+        elif type == "HC2":                 # HC2 divides the squared residuals by the leverage, increases weight to higher leverage obs.
+            omega_diagonal = e2/(1 - h)
+        elif type == "HC3":                 # HC3 divides the squared residuals by one less than leverage squared, generally aggressive
+            omega_diagonal = e2/((1 - h)**2)
+        else:
+            raise ValueError("'HC0', 'HC1', 'HC2', or 'HC3'")
+
+        # Multiply each X row by X*(diagonal weights)^(0.5)
+        X_omega = X * np.sqrt(omega_diagonal)[:, None] # Weigh across columns
+
+        # Sandwich estimator: robust variance-covariance matrix
+        robust_cov = xtx_inv @ (X_omega.T @ X_omega) @ xtx_inv
+
+        # Diagonal extract the var/cov matrix and square to get robust std errors.
+        robust_se = np.sqrt(np.diag(robust_cov))
+
+        robust_t_stat = self.theta / robust_se
+        
+        return {
+            "covariance": robust_cov,
+            "std_errors": robust_se,
+            "t": robust_t_stat,
+            "type": type
+}
 
 
 
@@ -322,12 +329,7 @@ class LinearRegressionOLS:
 '''========== Callable Functions =========='''
 
 
-
-'''
-Regression output that can compare multiple models.
-
-'''
-def stargazer(models, col_width=15) -> str:
+def stargazer(models, col_width=15):
 
     # Handle single model input
     if not isinstance(models, list):
@@ -340,7 +342,7 @@ def stargazer(models, col_width=15) -> str:
     
     # Length of dividers by amount of models
     format_length = (
-        38 if len(models) == 1 else
+        35 if len(models) == 1 else
         52 if len(models) == 2  else
         68 if len(models) == 3  else
         81 if len(models) == 4  else
@@ -367,6 +369,7 @@ def stargazer(models, col_width=15) -> str:
     for feature in all_features:
         coef_row = f"{feature:<20}"
         se_row = " " * 20
+        #t_row = " " * 20
 
         # Collect coefficients based on index of features
         for model in models:
@@ -375,6 +378,7 @@ def stargazer(models, col_width=15) -> str:
                 coef = model.theta[feature_index]
                 se = model.std_error_coefficient[feature_index]
                 p = model.p_value_coefficient[feature_index]
+                t = model.t_stat_coefficient[feature_index]
                 
                 stars = (
                     "***" if p < 0.01 else
@@ -384,17 +388,21 @@ def stargazer(models, col_width=15) -> str:
                 )
                 coef_fmt = f"{coef:.4f}{stars}" if abs(coef) > 0.0001 else f"{coef:.2e}{stars}"
                 se_fmt = f"({se:.4f})" if abs(se) > 0.0001 else f"({se:.2e})"
+                #t_fmt = f"{t:.4f}" if abs(t) > 0.0001 else f"({t:.2e})"
                 
                 coef_row += f"{coef_fmt:>{col_width}}"
                 se_row += f"{se_fmt:>{col_width}}"
+                #t_row += f"{t_fmt:>{col_width}}"
             else:
                 coef_row += " " * col_width
                 se_row += " " * col_width
+                #t_row += " " * col_width
 
         # output the completed row for the feature from each model
         rows.append(" ")
         rows.append(coef_row)
         rows.append(se_row)
+        #rows.append(t_row)
 
     # Collect model statistics and attribute names
     stats_lines = [
