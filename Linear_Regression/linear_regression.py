@@ -11,20 +11,19 @@ class LinearRegressionOLS:
     
     X: np.ndarray = field(default=None, repr=False)
     y: np.ndarray = field(default=None, repr=False)
+    degrees_freedom: int = None
     
     theta: np.ndarray = field(default=None)
     coefficients: np.ndarray = field(default=None)
     intercept: float = None
 
     residuals: np.ndarray = field(default=None, repr=False)
-    degrees_freedom: int = None
     rss: float = None
     tss: float = None
     ess: float = None
     mse: float = None
     rmse: float = None
     r_squared: float = None
-    r_squared_2: float = None
     r_squared_adjusted: float = None
     log_likelihood: float = None
     aic: float = None
@@ -40,9 +39,9 @@ class LinearRegressionOLS:
     def __str__(self):
         if self.theta is None:
             return f"LinearRegressionOLS()"
-        return stargazer(self)
+        return RegressionOutput(self)
     
-    def summary(self):
+    def feature_summary(self):
         if self.theta is None:
             return {}
         return [
@@ -61,10 +60,21 @@ class LinearRegressionOLS:
         zip(self.feature_names, self.theta, self.std_error_coefficient, self.t_stat_coefficient, self.p_value_coefficient, self.ci_low, self.ci_high)
     ]
     
-    def fit(self, y, X, alpha = 0.05):
+    def fit(self, y, X, feature_names = None, target_name = None, alpha = 0.05):
+
         self.alpha = alpha
-        self.feature_names = X.columns if hasattr(X, 'columns') else [f"Feature {n}" for n in range(0, X.shape[1])]
-        self.target = y.name if hasattr(y, 'name') else "Target"
+
+        self.feature_names = (
+            X.columns if hasattr(X, 'columns')
+            else feature_names if feature_names is not None
+            else ['const', *[f"Feature {i}" for i in range(1,X.shape[1])]] # Generic names for no args np array inputs, assuming const first.
+        )
+        self.target = (
+            y.name if hasattr(y, 'name')
+            else target_name if target_name is not None
+            else "Dependent"
+        )
+
         self.X, self.y = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
         
         xtx_inv = np.linalg.inv(self.X.T @ self.X)
@@ -72,35 +82,23 @@ class LinearRegressionOLS:
 
         self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         
-        # Predicted values and residuals
         y_hat = self.X @ self.theta        # or can call self.predict(self.X)
         y_bar = np.mean(self.y) 
         self.residuals = self.y - y_hat
 
-        # Sum of squares
         self.rss = self.residuals @ self.residuals 
         self.tss = np.sum((self.y - y_bar)**2)                   
         self.ess = np.sum((y_hat - y_bar)**2)  
 
-        # Residual degrees of freedom
         self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
-
-        # R squared
         self.r_squared = 1 - (self.rss / self.tss)
-        self.r_squared_2 = self.ess / self.tss
 
-        # Mean Squared Error and Root Mean Squared Error
         self.mse = self.rss / self.degrees_freedom 
         self.rmse = np.sqrt(self.mse)
-
-        # F-statistic                          
+                  
         self.f_statistic = (self.ess / self.coefficients.shape[0]) / self.mse
 
-        # Adjusted r2
         self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.X.shape[0] - 1) / self.degrees_freedom
-
-        #self.aic = self.X.shape[0] * np.log(2 * np.pi * self.mse) + self.X.shape[0] + 2 * self.X.shape[1]
-        #self.bic = self.X.shape[0] * np.log(2 * np.pi * self.mse) + self.X.shape[0] + np.log(self.X.shape[0]) * self.X.shape[1]
 
         self.log_likelihood = -self.X.shape[0]/2 * (np.log(2 * np.pi) + np.log(self.rss / self.X.shape[0]) + 1)
         self.aic = -2 * self.log_likelihood + 2 * self.X.shape[1]
@@ -109,19 +107,15 @@ class LinearRegressionOLS:
         # Variance of the coefficients (Covariance matrix)
         self.variance_coefficient = self.mse * xtx_inv     
 
-        # Standard error of the coefficients 
         self.std_error_coefficient = np.sqrt(np.diag(self.variance_coefficient))
 
-        # T statistic for the coefficients
         self.t_stat_coefficient = self.theta / self.std_error_coefficient
 
-        # p > |T| for the coefficients
         self.p_value_coefficient = 2 * (1 - t_dist.cdf(abs(self.t_stat_coefficient), self.degrees_freedom))
 
         # T critical for the coefficients 
         t_crit = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
 
-        # Coefficient confidence intervals
         self.ci_low = self.theta - t_crit * self.std_error_coefficient
         self.ci_high = self.theta + t_crit * self.std_error_coefficient
 
@@ -134,7 +128,6 @@ class LinearRegressionOLS:
         return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
     
 
-    
     def PredictionAnalysis(self, X_test, alpha=0.05):
         if self.theta is None:
             raise ValueError("Error: Model is not fitted.")
@@ -162,35 +155,29 @@ class LinearRegressionOLS:
     })
 
 
-
     '''
     Test the effects of two predictions to determine statistical significance
     Test must be an array of (X) feature values.
     Hypothesis can either be a value for y as a float, or an array of (X) feature values.
     '''
     def HypothesisTesting(self, test, hyp, alpha=0.05, critical=1.96):
-        # Collecting feature names without constant term
+
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
-
         hypothesis_features = ({j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])} if isinstance(hyp, np.ndarray) else {"Input Value (y)": f"{hyp}"})
-
-        # Add a constant to the first prediction                                                                                  
+                                                                     
         test = np.hstack([np.ones((test.shape[0], 1)), test])
 
         # Predict the two points (unless X_hyp is given as a float)
-        prediction, hypothesis = test @ self.theta, (hyp @ self.theta if isinstance(hyp, np.ndarray) else np.asarray(hyp))
+        prediction, hypothesis = test @ self.theta, (np.hstack([np.ones((hyp.shape[0], 1)), hyp]) @ self.theta if isinstance(hyp, np.ndarray) else np.asarray(hyp))
 
-        # Standard error of the first prediction     
         se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()  
 
-        # Confidence intervals for the first prediction
         t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
         ci_low, ci_high = (prediction - t_critical * se),  (prediction + t_critical * se)                 
 
-        # Determine the t statistic for the first prediction relative to the hypothesis
+        # Pred relative to hyp
         t_stat = (prediction - hypothesis) / se          
-
-        # P significance for the first prediction compared to the hypothesis
+        # Pred relative to hyp
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
         result = (
@@ -221,8 +208,8 @@ class LinearRegressionOLS:
         
         X = self.X[:,1:]
         n_features = X.shape[1]
-
         vif = []
+
         for i in range(n_features):
             # Constant bool column length of features, but this iteration is false
             mask = np.ones(n_features, dtype=bool)
@@ -231,19 +218,16 @@ class LinearRegressionOLS:
             # X_j is the target, X_other are predictors
             X_j = X[:, i]
             X_other = X[:, mask]
-
-            # Add intercept to X_other
             X_other_with_intercept = np.column_stack([np.ones(X_other.shape[0]), X_other])
 
-            # Fit auxiliary regression: X_j ~ X_other
+            #  X_j ~ X_other
             theta_aux = np.linalg.inv(X_other_with_intercept.T @ X_other_with_intercept) @ (X_other_with_intercept.T @ X_j)
             y_hat_aux = X_other_with_intercept @ theta_aux
 
-            # Calculate r-squared for auxiliary regression
+            # sum squares, r squared for aux model
             tss_aux = np.sum((X_j - np.mean(X_j))**2)
             rss_aux = np.sum((X_j - y_hat_aux)**2)
             r_squared_aux = 1 - (rss_aux / tss_aux)
-
             vif.append(1 / (1 - r_squared_aux) if r_squared_aux < 0.9999 else np.inf)
 
         return ({
@@ -260,36 +244,7 @@ class LinearRegressionOLS:
         xtx_inv = np.linalg.inv(X.T @ X)
         residuals = self.residuals.reshape(-1, 1) # Column vector
 
-        '''
-        #Traditional mathematical approach - Extremely computationally ineffective.
-
-        h = np.diag(X @ xtx_inv @ X.T)
-
-
-        # Compute the scaling for each version
-        if type == "HC0":
-            omega_diag = (residuals.flatten())**2
-        elif type == "HC1":
-            omega_diag = (n / (n - k)) * (residuals.flatten())**2
-        elif type == "HC2":
-            omega_diag = (residuals.flatten()**2) / (1 - h)
-        elif type == "HC3":
-            omega_diag = (residuals.flatten()**2) / ((1 - h)**2)
-        else:
-            raise ValueError("type must be one of: 'HC0', 'HC1', 'HC2', or 'HC3'")
-
-        # Build diagonal omega matrix
-        Omega = np.diag(omega_diag)
-
-        # Compute robust covariance matrix (the "sandwich")
-        robust_cov = xtx_inv @ (X.T @ Omega @ X) @ xtx_inv
-
-        # Robust standard errors
-        robust_se = np.sqrt(np.diag(robust_cov))
-        '''
-
         # Computationally effective. Build only the diagonal regression matrix.
-
         h = np.sum(X @ xtx_inv * X, axis=1) # leverage h_ii WITHOUT forming full H = X(X'X)^(-1)X'
 
         e2 = residuals.flatten()**2 # squared residuals/errors
@@ -324,31 +279,17 @@ class LinearRegressionOLS:
 }
 
 
+def RegressionOutput(models, col_width=15):
 
-
-'''========== Callable Functions =========='''
-
-
-def stargazer(models, col_width=15):
-
-    # Handle single model input
     if not isinstance(models, list):
         models = [models]
 
-    # Verify models are fitted
     for i, model in enumerate(models):
         if model.theta is None:
             raise ValueError(f"Error: Model {i+1} is not fitted.")
     
-    # Length of dividers by amount of models
-    format_length = (
-        35 if len(models) == 1 else
-        52 if len(models) == 2  else
-        68 if len(models) == 3  else
-        81 if len(models) == 4  else
-        100 if len(models) == 5  else
-        110
-    )
+    format_length = 20 + (len(models)*col_width)
+
     header = (
         f"\n{"="*format_length}\n"
         "OLS Regression Results\n"
@@ -415,7 +356,7 @@ def stargazer(models, col_width=15):
         ("BIC", "bic")
     ]
     
-    stats = f"{"-"*format_length}\n"
+    stats = f"\n{"-"*format_length}\n"
 
     # Call the attributes and append the results to the row
     for label, attr in stats_lines:
@@ -430,5 +371,5 @@ def stargazer(models, col_width=15):
         "\n".join(rows) + "\n" +
         stats +
         f"{"="*format_length}\n"
-        "Significance: *p<0.1; **p<0.05; ***p<0.01\n"
+        "*p<0.1; **p<0.05; ***p<0.01\n"
 )
