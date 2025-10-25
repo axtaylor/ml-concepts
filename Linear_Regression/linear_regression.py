@@ -113,7 +113,6 @@ class LinearRegressionOLS:
 
         self.p_value_coefficient = 2 * (1 - t_dist.cdf(abs(self.t_stat_coefficient), self.degrees_freedom))
 
-        # T critical for the coefficients 
         t_crit = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
 
         self.ci_low = self.theta - t_crit * self.std_error_coefficient
@@ -136,6 +135,8 @@ class LinearRegressionOLS:
 
         X_test = np.hstack([np.ones((X_test.shape[0], 1)), X_test]) 
         prediction = X_test @ self.theta
+ 
+        #derivative = [prediction[i+1] - prediction[i] for i in list(range(0, len(prediction)))]
 
         se_prediction = np.sqrt((X_test @ self.variance_coefficient @ X_test.T)).item()
         t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
@@ -146,12 +147,13 @@ class LinearRegressionOLS:
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
         return ({
-            "x__input_vals": [prediction_features],
-            "y__prediction": [np.round(prediction.item(), 4)],
-            "se__prediction": [np.round(se_prediction,4)],
-            "t_statistic__prediction": [np.round(t_stat.item(),4)],
-            "p_>_abs_t__prediction": [p.item()],
-            f"ci__prediction_{alpha}": [[np.round(ci_low.item(), 4), np.round(ci_high.item(), 4)]],
+            "features": [prediction_features],
+            "prediction": [np.round(prediction.item(), 4)],
+            "std_error": [np.round(se_prediction,4)],
+            "t_statistic": [np.round(t_stat.item(),4)],
+            "P>|t|": [p.item()],
+            f"ci_low_{alpha}": [np.round(ci_low.item(), 4)],
+            f"ci_high_{alpha}": [np.round(ci_high.item(), 4)],
     })
 
 
@@ -224,7 +226,7 @@ class LinearRegressionOLS:
             theta_aux = np.linalg.inv(X_other_with_intercept.T @ X_other_with_intercept) @ (X_other_with_intercept.T @ X_j)
             y_hat_aux = X_other_with_intercept @ theta_aux
 
-            # sum squares, r squared for aux model
+            # Auxiliary
             tss_aux = np.sum((X_j - np.mean(X_j))**2)
             rss_aux = np.sum((X_j - y_hat_aux)**2)
             r_squared_aux = 1 - (rss_aux / tss_aux)
@@ -242,9 +244,8 @@ class LinearRegressionOLS:
         X = self.X
         n, k = X.shape
         xtx_inv = np.linalg.inv(X.T @ X)
-        residuals = self.residuals.reshape(-1, 1) # Column vector
+        residuals = self.residuals.reshape(-1, 1) 
 
-        # Computationally effective. Build only the diagonal regression matrix.
         h = np.sum(X @ xtx_inv * X, axis=1) # leverage h_ii WITHOUT forming full H = X(X'X)^(-1)X'
 
         e2 = residuals.flatten()**2 # squared residuals/errors
@@ -263,10 +264,10 @@ class LinearRegressionOLS:
         # Multiply each X row by X*(diagonal weights)^(0.5)
         X_omega = X * np.sqrt(omega_diagonal)[:, None] # Weigh across columns
 
-        # Sandwich estimator: robust variance-covariance matrix
+        # Sandwich 
         robust_cov = xtx_inv @ (X_omega.T @ X_omega) @ xtx_inv
 
-        # Diagonal extract the var/cov matrix and square to get robust std errors.
+        # Diagonal extract the var-cov 
         robust_se = np.sqrt(np.diag(robust_cov))
 
         robust_t_stat = self.theta / robust_se
@@ -298,21 +299,18 @@ def RegressionOutput(models, col_width=15):
         f"{"-"*format_length}\n"
     )
 
-    # Add all features to the output, iteratively collecting new features in each model
     all_features = []
     for model in models:
         for feature in model.feature_names:
             if feature not in all_features:
                 all_features.append(feature)
     
-    # Add each row, iteratively.
     rows = []
     for feature in all_features:
         coef_row = f"{feature:<20}"
         se_row = " " * 20
         #t_row = " " * 20
 
-        # Collect coefficients based on index of features
         for model in models:
             if feature in model.feature_names:
                 feature_index = list(model.feature_names).index(feature)
@@ -339,13 +337,11 @@ def RegressionOutput(models, col_width=15):
                 se_row += " " * col_width
                 #t_row += " " * col_width
 
-        # output the completed row for the feature from each model
         rows.append(" ")
         rows.append(coef_row)
         rows.append(se_row)
         #rows.append(t_row)
 
-    # Collect model statistics and attribute names
     stats_lines = [
         ("R²", "r_squared"),
         ("Adjusted R²", "r_squared_adjusted"),
@@ -358,14 +354,12 @@ def RegressionOutput(models, col_width=15):
     
     stats = f"\n{"-"*format_length}\n"
 
-    # Call the attributes and append the results to the row
     for label, attr in stats_lines:
         stat_row = f"{label:<20}"
         for model in models:
             stat_row += f"{(attr(model) if callable(attr) else getattr(model, attr)):>{col_width}.3f}"
         stats += stat_row + "\n"
-    
-    # Return final constructed output
+
     return (
         header +
         "\n".join(rows) + "\n" +
