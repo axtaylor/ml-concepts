@@ -2,8 +2,9 @@
 
 !.gitignore
 
-!Linear_Regression/
-!Linear_Regression/linear_regression.py
-!Linear_Regression/linear_regression_gradient.py
+!Linear Regression/
+!Linear Regression/linear_regression.py
+!Linear Regression/linear_regression_gradient.py
 
 
+!Neural Networks/
