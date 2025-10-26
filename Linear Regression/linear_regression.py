@@ -55,7 +55,7 @@ class LinearRegressionOLS:
         zip(self.feature_names, self.theta, self.std_error_coefficient, self.t_stat_coefficient, self.p_value_coefficient, self.ci_low, self.ci_high)
     ]
     
-    def fit(self, y, X, feature_names = None, target_name = None, alpha = 0.05):
+    def fit(self, X, y, feature_names = None, target_name = None, alpha = 0.05):
         self.alpha = alpha
 
         self.feature_names = (
