@@ -4,19 +4,15 @@ from dataclasses import dataclass, field
 
 @dataclass
 class LinearRegressionOLS:
-
     alpha: float = None
     feature_names: list = field(default_factory=list)
     target: str = None
-    
     X: np.ndarray = field(default=None, repr=False)
     y: np.ndarray = field(default=None, repr=False)
     degrees_freedom: int = None
-    
     theta: np.ndarray = field(default=None)
     coefficients: np.ndarray = field(default=None)
     intercept: float = None
-
     residuals: np.ndarray = field(default=None, repr=False)
     rss: float = None
     tss: float = None
@@ -28,7 +24,6 @@ class LinearRegressionOLS:
     log_likelihood: float = None
     aic: float = None
     bic: float = None
-
     variance_coefficient: np.ndarray = field(default=None, repr=False)
     std_error_coefficient: np.ndarray = field(default=None)
     t_stat_coefficient: np.ndarray = field(default=None)
@@ -38,12 +33,12 @@ class LinearRegressionOLS:
     
     def __str__(self):
         if self.theta is None:
-            return f"LinearRegressionOLS()"
+            return "LinearRegressionOLS()"
         return RegressionOutput(self)
     
     def feature_summary(self):
         if self.theta is None:
-            return {}
+            raise ValueError("Error: Model is not fitted.")
         return [
         {
             "feature": feature,
@@ -61,7 +56,6 @@ class LinearRegressionOLS:
     ]
     
     def fit(self, y, X, feature_names = None, target_name = None, alpha = 0.05):
-
         self.alpha = alpha
 
         self.feature_names = (
@@ -74,75 +68,62 @@ class LinearRegressionOLS:
             else target_name if target_name is not None
             else "Dependent"
         )
-
         self.X, self.y = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
-        
+        self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
+
+        # Fit    
         xtx_inv = np.linalg.inv(self.X.T @ self.X)
         self.theta = xtx_inv @ (self.X.T @ self.y)                               
-
         self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         
-        y_hat = self.X @ self.theta        # or can call self.predict(self.X)
+        # Predict
+        y_hat = self.X @ self.theta #self.predict(self.X)
         y_bar = np.mean(self.y) 
         self.residuals = self.y - y_hat
 
-        self.rss = self.residuals @ self.residuals 
-        self.tss = np.sum((self.y - y_bar)**2)                   
-        self.ess = np.sum((y_hat - y_bar)**2)  
+        # Squared Residuals
+        self.rss = self.residuals @ self.residuals                
+        self.ess = np.sum((y_hat - y_bar)**2) 
+        self.tss = np.sum((self.y - y_bar)**2)     
 
-        self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
-        self.r_squared = 1 - (self.rss / self.tss)
-
+        # Loss
         self.mse = self.rss / self.degrees_freedom 
         self.rmse = np.sqrt(self.mse)
-                  
+
+        # Model 
         self.f_statistic = (self.ess / self.coefficients.shape[0]) / self.mse
-
+        self.r_squared = 1 - (self.rss / self.tss)
         self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.X.shape[0] - 1) / self.degrees_freedom
-
         self.log_likelihood = -self.X.shape[0]/2 * (np.log(2 * np.pi) + np.log(self.rss / self.X.shape[0]) + 1)
         self.aic = -2 * self.log_likelihood + 2 * self.X.shape[1]
         self.bic = -2 * self.log_likelihood + self.X.shape[1] * np.log(self.X.shape[0])
 
-        # Variance of the coefficients (Covariance matrix)
-        self.variance_coefficient = self.mse * xtx_inv     
-
+        # Feature 
+        self.variance_coefficient = self.mse * xtx_inv  # Variance of the coefficients (Covariance matrix)
         self.std_error_coefficient = np.sqrt(np.diag(self.variance_coefficient))
-
         self.t_stat_coefficient = self.theta / self.std_error_coefficient
-
         self.p_value_coefficient = 2 * (1 - t_dist.cdf(abs(self.t_stat_coefficient), self.degrees_freedom))
 
         t_crit = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
-
         self.ci_low = self.theta - t_crit * self.std_error_coefficient
         self.ci_high = self.theta + t_crit * self.std_error_coefficient
 
         return self
 
-
-    def predict(self, X) -> np.ndarray:
+    def predict(self, X, alpha=0.05, return_table=False):
         if self.theta is None:
-            raise ValueError("Error: Model is not fitted.")
-        return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
+            raise ValueError("Error: Model is not fitted.")        
+        if return_table == False:
+            return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
     
+        prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], X[0])}
+        X = np.hstack([np.ones((X.shape[0], 1)), X]) 
 
-    def PredictionAnalysis(self, X_test, alpha=0.05):
-        if self.theta is None:
-            raise ValueError("Error: Model is not fitted.")
-
-        prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], X_test[0])}
-
-        X_test = np.hstack([np.ones((X_test.shape[0], 1)), X_test]) 
-        prediction = X_test @ self.theta
- 
-        #derivative = [prediction[i+1] - prediction[i] for i in list(range(0, len(prediction)))]
-
-        se_prediction = np.sqrt((X_test @ self.variance_coefficient @ X_test.T)).item()
+        prediction = X @ self.theta
+        se_prediction = np.sqrt((X @ self.variance_coefficient @ X.T)).item()
         t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
 
         ci_low, ci_high = (prediction - t_critical * se_prediction), (prediction + t_critical * se_prediction)
-
         t_stat = prediction / se_prediction
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
@@ -156,77 +137,64 @@ class LinearRegressionOLS:
             f"ci_high_{alpha}": [np.round(ci_high.item(), 4)],
     })
 
-
-    '''
-    Test the effects of two predictions to determine statistical significance
-    Test must be an array of (X) feature values.
-    Hypothesis can either be a value for y as a float, or an array of (X) feature values.
-    '''
     def HypothesisTesting(self, test, hyp, alpha=0.05, critical=1.96):
 
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
-        hypothesis_features = ({j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])} if isinstance(hyp, np.ndarray) else {"Input Value (y)": f"{hyp}"})
-                                                                     
+        hypothesis_features = (
+            {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])}
+            if isinstance(hyp, np.ndarray)
+            else {f"{self.target}": f"{hyp}"}
+        )                                                 
         test = np.hstack([np.ones((test.shape[0], 1)), test])
 
-        # Predict the two points (unless X_hyp is given as a float)
-        prediction, hypothesis = test @ self.theta, (np.hstack([np.ones((hyp.shape[0], 1)), hyp]) @ self.theta if isinstance(hyp, np.ndarray) else np.asarray(hyp))
-
-        se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()  
-
-        t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
-        ci_low, ci_high = (prediction - t_critical * se),  (prediction + t_critical * se)                 
-
-        # Pred relative to hyp
-        t_stat = (prediction - hypothesis) / se          
-        # Pred relative to hyp
+        prediction, hypothesis = test @ self.theta, (
+            np.hstack([np.ones((hyp.shape[0], 1)), hyp]) @ self.theta
+            if isinstance(hyp, np.ndarray)
+            else np.asarray(hyp)
+        )
+        se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()            
+        t_stat = (prediction - hypothesis) / se       
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
         result = (
+            f"Significance Analysis (p > |t|)\n{critical} > |{t_stat.item():.4f}| == {abs(t_stat.item()) < critical}\n"
             f"\nFail to reject the null hypothesis: {prediction.item():.4f} is not statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
             f"\nConclude that outcome of {prediction_features}\ndoes not differ from {hypothesis_features}"
             if abs(t_stat.item()) < critical else
             f"Reject the null hypothesis: {prediction.item():.4f} is statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
             f"Conclude that the outcomes of {prediction_features}\ndiffers significantly from {hypothesis_features}"
         )
-        print(f"Marginal Effects Comparison:\n\nSignificance Analysis (p > |t|)\n1.96 > |{t_stat.item():.4f}| == {abs(t_stat.item()) < critical}\n", result)
-
-        return ({
-            "x__prediction_vals": [prediction_features],
-            "x__hypothesis_vals": [hypothesis_features],
-            "y__prediction": [prediction.item()],
-            "y__hypothesis": [hypothesis.item()],
-            "se__prediction": [se],
-            f"ci__prediction_{alpha}": [[np.round(ci_low.item(), 4), np.round(ci_high.item(), 4)]],
-            "t_statistic__prediction_hypothesis": [t_stat.item()],
-            "p_>_abs_t__prediction_hypothesis": [p.item()],
-    })
-
-
+        return (
+        {
+            "summary": result, 
+            "table": {
+                "feature_labels": [prediction_features],
+                "hypothesis_labels": [hypothesis_features],
+                "prediction": [prediction.item()],
+                "hypothesis": [hypothesis.item()],
+                "t-statistic": [t_stat.item()],
+                "P>|t|": [p.item()],
+            },
+        }
+    )
 
     def VarianceInflationFactor(self):
         if self.theta is None:
             raise ValueError("Error: Model is not fitted.")
         
         X = self.X[:,1:]
-        n_features = X.shape[1]
-        vif = []
-
+        n_features, vif = X.shape[1], []
         for i in range(n_features):
-            # Constant bool column length of features, but this iteration is false
-            mask = np.ones(n_features, dtype=bool)
+    
+            mask = np.ones(n_features, dtype=bool) 
             mask[i] = False
+            
+            X_j = X[:, i]                                                                        # Target
+            X_other_with_intercept = np.column_stack([np.ones(X[:, mask].shape[0]), X[:, mask]]) # Other Features
 
-            # X_j is the target, X_other are predictors
-            X_j = X[:, i]
-            X_other = X[:, mask]
-            X_other_with_intercept = np.column_stack([np.ones(X_other.shape[0]), X_other])
-
-            #  X_j ~ X_other
+            # Auxiliary fit
             theta_aux = np.linalg.inv(X_other_with_intercept.T @ X_other_with_intercept) @ (X_other_with_intercept.T @ X_j)
             y_hat_aux = X_other_with_intercept @ theta_aux
-
-            # Auxiliary
             tss_aux = np.sum((X_j - np.mean(X_j))**2)
             rss_aux = np.sum((X_j - y_hat_aux)**2)
             r_squared_aux = 1 - (rss_aux / tss_aux)
@@ -237,51 +205,44 @@ class LinearRegressionOLS:
             'VIF': np.round(vif, 4)
     })
 
-
-
     def RobustStandardError(self, type="HC3"):
-
         X = self.X
         n, k = X.shape
         xtx_inv = np.linalg.inv(X.T @ X)
         residuals = self.residuals.reshape(-1, 1) 
-
         h = np.sum(X @ xtx_inv * X, axis=1) # leverage h_ii WITHOUT forming full H = X(X'X)^(-1)X'
+        sr = residuals.flatten()**2
+        HC_ = {
+            "HC0": lambda sr, n_obs, k_regressors, leverage: sr,
+            "HC1": lambda sr, n_obs, k_regressors, leverage: (n_obs / (n_obs - k_regressors)) * sr,
+            "HC2": lambda sr, n_obs, k_regressors, leverage: sr / (1 - leverage),
+            "HC3": lambda sr, n_obs, k_regressors, leverage: sr / ((1 - leverage) ** 2),
+        }
+        try:
+            omega_diagonal = HC_[type](sr, n, k, h)
+            X_omega = X * np.sqrt(omega_diagonal)[:, None]              # Multiply each X row by X*(diagonal weights)^(0.5)
+            robust_cov = xtx_inv @ (X_omega.T @ X_omega) @ xtx_inv      # Sandwich 
+            robust_se = np.sqrt(np.diag(robust_cov))                    # Diagonal extract the var-cov 
+            robust_t_stat = self.theta / robust_se
 
-        e2 = residuals.flatten()**2 # squared residuals/errors
-
-        if type == "HC0":                   # HC0 uses the squared residuals as the omega
-            omega_diagonal = e2
-        elif type == "HC1":                 # HC1 uses the squared residuals multiplied by degrees freedom correction, small sample bias...
-            omega_diagonal = (n/(n - k))*e2
-        elif type == "HC2":                 # HC2 divides the squared residuals by the leverage, increases weight to higher leverage obs.
-            omega_diagonal = e2/(1 - h)
-        elif type == "HC3":                 # HC3 divides the squared residuals by one less than leverage squared, generally aggressive
-            omega_diagonal = e2/((1 - h)**2)
-        else:
-            raise ValueError("'HC0', 'HC1', 'HC2', or 'HC3'")
-
-        # Multiply each X row by X*(diagonal weights)^(0.5)
-        X_omega = X * np.sqrt(omega_diagonal)[:, None] # Weigh across columns
-
-        # Sandwich 
-        robust_cov = xtx_inv @ (X_omega.T @ X_omega) @ xtx_inv
-
-        # Diagonal extract the var-cov 
-        robust_se = np.sqrt(np.diag(robust_cov))
-
-        robust_t_stat = self.theta / robust_se
-        
-        return {
-            "covariance": robust_cov,
-            "std_errors": robust_se,
-            "t": robust_t_stat,
-            "type": type
-}
+            return {
+            "feature": self.feature_names,
+            #"covariance": robust_cov,
+            "robust_se": robust_se,
+            "robust_t": robust_t_stat,
+            "robust_p": 2 * (1 - t_dist.cdf(abs(robust_t_stat), self.degrees_freedom))
+            #"type": type
+        }
+        except KeyError:
+            raise ValueError("Select 'HC0', 'HC1', 'HC2', 'HC3'")
 
 
-def RegressionOutput(models, col_width=15):
 
+
+'''
+Can print multiple models side by side
+'''
+def RegressionOutput(models, col_width=15, compression=20):
     if not isinstance(models, list):
         models = [models]
 
@@ -289,46 +250,48 @@ def RegressionOutput(models, col_width=15):
         if model.theta is None:
             raise ValueError(f"Error: Model {i+1} is not fitted.")
     
-    format_length = 20 + (len(models)*col_width)
-
+    format_length = compression + (len(models)*col_width)
     header = (
         f"\n{"="*format_length}\n"
         "OLS Regression Results\n"
         f"{"="*format_length}\n"
-        f"{'Dependent:':<20}" + "".join(f"{m.target:>{col_width}}" for m in models) + "\n"
+        f"{'Dependent:':<{compression}}" + "".join(f"{m.target:>{col_width}}" for m in models) + "\n"
         f"{"-"*format_length}\n"
     )
-
     all_features = []
     for model in models:
         for feature in model.feature_names:
             if feature not in all_features:
                 all_features.append(feature)
-    
     rows = []
     for feature in all_features:
-        coef_row = f"{feature:<20}"
-        se_row = " " * 20
-        #t_row = " " * 20
-
+        coef_row = f"{feature:<{compression}}"
+        se_row = " " * compression
+        #t_row = " " * compression
         for model in models:
             if feature in model.feature_names:
                 feature_index = list(model.feature_names).index(feature)
                 coef = model.theta[feature_index]
                 se = model.std_error_coefficient[feature_index]
                 p = model.p_value_coefficient[feature_index]
-                t = model.t_stat_coefficient[feature_index]
-                
+                #t = model.t_stat_coefficient[feature_index]
                 stars = (
                     "***" if p < 0.01 else
                     "**" if p < 0.05 else
                     "*" if p < 0.1 else
                     ""
                 )
-                coef_fmt = f"{coef:.4f}{stars}" if abs(coef) > 0.0001 else f"{coef:.2e}{stars}"
-                se_fmt = f"({se:.4f})" if abs(se) > 0.0001 else f"({se:.2e})"
+                coef_fmt = (
+                    f"{coef:.4f}{stars}"
+                    if abs(coef) > 0.0001
+                    else f"{coef:.2e}{stars}"
+                )
+                se_fmt = (
+                    f"({se:.4f})"
+                    if abs(se) > 0.0001
+                    else f"({se:.2e})"
+                )
                 #t_fmt = f"{t:.4f}" if abs(t) > 0.0001 else f"({t:.2e})"
-                
                 coef_row += f"{coef_fmt:>{col_width}}"
                 se_row += f"{se_fmt:>{col_width}}"
                 #t_row += f"{t_fmt:>{col_width}}"
@@ -336,30 +299,25 @@ def RegressionOutput(models, col_width=15):
                 coef_row += " " * col_width
                 se_row += " " * col_width
                 #t_row += " " * col_width
-
         rows.append(" ")
         rows.append(coef_row)
         rows.append(se_row)
         #rows.append(t_row)
-
     stats_lines = [
-        ("R²", "r_squared"),
-        ("Adjusted R²", "r_squared_adjusted"),
+        ("R-squared", "r_squared"),
+        ("Adjusted R-squared", "r_squared_adjusted"),
         ("F Statistic", "f_statistic"),
         ("Observations", lambda m: m.X.shape[0]),
         ("Log Likelihood", "log_likelihood"),
         ("AIC", "aic"),
         ("BIC", "bic")
     ]
-    
     stats = f"\n{"-"*format_length}\n"
-
     for label, attr in stats_lines:
-        stat_row = f"{label:<20}"
+        stat_row = f"{label:<{compression}}"
         for model in models:
             stat_row += f"{(attr(model) if callable(attr) else getattr(model, attr)):>{col_width}.3f}"
         stats += stat_row + "\n"
-
     return (
         header +
         "\n".join(rows) + "\n" +
