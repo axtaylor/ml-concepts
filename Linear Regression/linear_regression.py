@@ -142,12 +142,13 @@ class LinearRegressionOLS:
             )
         if np.linalg.cond(xtx) > 1e10:
             warnings.warn(
-                f"X'X matrix is ill-conditioned (cond={np.linalg.cond(xtx):.2e}). "
-                f"Results may be unreliable. Consider:\n"
+                f"\nX'X matrix is ill-conditioned (cond={np.linalg.cond(xtx):.2e}). "
+                f"Results may be unreliable.\nConsider:\n"
                 f"- Removing collinear features\n"
                 f"- Scaling features\n"
-                f"- Using regularization",
-                UserWarning
+                f"- Using regularization\n",
+                UserWarning,
+                stacklevel=2
         )
         
         # Predict
