@@ -3,7 +3,6 @@ import pandas as pd
 from scipy.stats import t as t_dist
 from dataclasses import dataclass, field
 from typing import Optional, Union, List
-import logging
 import warnings
 
 @dataclass
@@ -120,12 +119,10 @@ class LinearRegressionOLS:
             else target_name if target_name is not None
             else "Dependent"
         )
-
         self.alpha = alpha
         self.X, self.y = X_array, y_array
         self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
 
-        logging.getLogger(__name__).info(f"Fitting OLS model with {X.shape[0]} observations, {X.shape[1]} features")
         # Cholesky decomposition fit    
         xtx = self.X.T @ self.X
         try:
@@ -140,17 +137,17 @@ class LinearRegressionOLS:
             "- Insufficient observations (n < k)\n"
             "- Constant or duplicate columns in X"
             )
-        if np.linalg.cond(xtx) > 1e10:
+        cond = np.linalg.cond(xtx)
+        if cond > 1e10:
             warnings.warn(
-                f"\nX'X matrix is ill-conditioned (cond={np.linalg.cond(xtx):.2e}). "
-                f"Results may be unreliable.\nConsider:\n"
+                f"X'X matrix is ill-conditioned (cond={cond:.2e}).\n"
+                f"Results may be unreliable. Consider:\n"
                 f"- Removing collinear features\n"
                 f"- Scaling features\n"
                 f"- Using regularization\n",
                 UserWarning,
                 stacklevel=2
         )
-        
         # Predict
         self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         y_hat = self.X @ self.theta #self.predict(self.X)
@@ -169,7 +166,7 @@ class LinearRegressionOLS:
         # Model 
         self.f_statistic = (
             (self.ess / self.coefficients.shape[0]) / self.mse
-            if self.coefficients.shape[0] != 0
+            if self.coefficients.shape[0] > 0 and self.mse > 1e-15
             else np.inf
         )
         self.r_squared = 1 - (self.rss / self.tss)
@@ -192,17 +189,14 @@ class LinearRegressionOLS:
 
     def predict(self, X, alpha=0.05, return_table=False):
         self._model_is_fitted()
-
         if return_table == False:
             return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
     
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], X[0])}
         X = np.hstack([np.ones((X.shape[0], 1)), X]) 
-
         prediction = X @ self.theta
         se_prediction = np.sqrt((X @ self.variance_coefficient @ X.T)).item()
         t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
-
         ci_low, ci_high = (prediction - t_critical * se_prediction), (prediction + t_critical * se_prediction)
         t_stat = prediction / se_prediction
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
@@ -217,8 +211,9 @@ class LinearRegressionOLS:
             f"ci_high_{alpha}": [np.round(ci_high.item(), 4)],
     })
 
-    def HypothesisTesting(self, test, hyp, alpha=0.05, critical=1.96):
+    def HypothesisTesting(self, test, hyp, alpha=0.05):
         self._model_is_fitted()
+        critical = np.round(t_dist.ppf(1 - alpha/2, self.degrees_freedom),2)
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
         hypothesis_features = (
             {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])}
@@ -226,7 +221,6 @@ class LinearRegressionOLS:
             else {f"{self.target}": f"{hyp}"}
         )                                                 
         test = np.hstack([np.ones((test.shape[0], 1)), test])
-
         prediction, hypothesis = test @ self.theta, (
             np.hstack([np.ones((hyp.shape[0], 1)), hyp]) @ self.theta
             if isinstance(hyp, np.ndarray)
@@ -273,7 +267,6 @@ class LinearRegressionOLS:
             # Auxiliary fit
             xtx = X_other_with_intercept.T @ X_other_with_intercept
             theta_aux = np.linalg.solve(xtx, X_other_with_intercept.T @ X_j)
-
             y_hat_aux = X_other_with_intercept @ theta_aux
             tss_aux = np.sum((X_j - np.mean(X_j))**2)
             if tss_aux < 1e-10:
