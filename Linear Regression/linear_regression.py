@@ -1,6 +1,10 @@
 import numpy as np
+import pandas as pd
 from scipy.stats import t as t_dist
 from dataclasses import dataclass, field
+from typing import Optional, Union, List
+import logging
+import warnings
 
 @dataclass
 class LinearRegressionOLS:
@@ -10,6 +14,7 @@ class LinearRegressionOLS:
     X: np.ndarray = field(default=None, repr=False)
     y: np.ndarray = field(default=None, repr=False)
     degrees_freedom: int = None
+    xtx_inv: np.ndarray = field(default=None, repr=False)
     theta: np.ndarray = field(default=None)
     coefficients: np.ndarray = field(default=None)
     intercept: float = None
@@ -30,22 +35,27 @@ class LinearRegressionOLS:
     p_value_coefficient: np.ndarray = field(default=None)
     ci_low: np.ndarray = field(default=None)
     ci_high: np.ndarray = field(default=None)
+
+    def _model_is_fitted(self):
+        if self.theta is None:
+            raise ValueError(
+                "Model is not fitted. Call 'fit' with arguments "
+                "before using this method."
+            )
     
     def __str__(self):
-        if self.theta is None:
-            return "LinearRegressionOLS()"
+        self._model_is_fitted()
         return RegressionOutput(self)
     
     def feature_summary(self):
-        if self.theta is None:
-            raise ValueError("Error: Model is not fitted.")
+        self._model_is_fitted()
         return [
         {
             "feature": feature,
             'coefficient': (np.round(coefficient,4) if abs(coefficient) > 0.0001 else np.format_float_scientific(coefficient, precision=2)),
             'se': (np.round(se,4) if abs(se) > 0.0001 else np.format_float_scientific(se, precision=2)),
             't_statistic': np.round(t, 4),
-            'p_>_abs_t': f'{p:.3f}',
+            'P>|t|': f'{p:.3f}',
             f'conf_interval__{self.alpha}': [
                 (np.round(low,3) if abs(low) > 0.0001 else np.format_float_scientific(low, precision=2)),
                 (np.round(high,3) if abs(high) > 0.0001 else np.format_float_scientific(high, precision=2)),
@@ -55,9 +65,51 @@ class LinearRegressionOLS:
         zip(self.feature_names, self.theta, self.std_error_coefficient, self.t_stat_coefficient, self.p_value_coefficient, self.ci_low, self.ci_high)
     ]
     
-    def fit(self, X, y, feature_names = None, target_name = None, alpha = 0.05):
-        self.alpha = alpha
+    def fit(
+        self,
+        X: Union[np.ndarray, pd.DataFrame],
+        y: Union[np.ndarray, pd.Series],
+        feature_names: Optional[List[str]] = None,
+        target_name: Optional[str] = None,
+        alpha: float = 0.05
+        ) -> 'LinearRegressionOLS':
+        
+        if X is None or y is None:
+            raise ValueError("X and y cannot be None")
+        
+        X_array, y_array = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
 
+        if X_array.size == 0 or y_array.size == 0:
+            raise ValueError("X and y cannot be empty")
+        
+        if len(X_array.shape) != 2:
+            raise ValueError(f"X must be 2D, got shape {X_array.shape} instead.")
+        
+        if len(y_array.shape) != 1:
+            if len(y_array.shape) == 2 and y_array.shape[1] == 1:
+                y_array = y_array.flatten()
+            else:
+                raise ValueError(f"y must be 1D, got shape {y_array.shape} instead.")
+        
+        if X_array.shape[0] != y_array.shape[0]:
+            raise ValueError(
+                f"X and y must have same number of observations. "
+                f"Got X: {X_array.shape[0]}, y: {y_array.shape[0]} instead."
+        )
+        if X_array.shape[0] <= X_array.shape[1]:
+            raise ValueError(
+                f"Insufficient observations. Need n > k, "
+                f"got n={X_array.shape[0]}, k={X_array.shape[1]} instead."
+        )
+        if not (0 < alpha < 1):
+            raise ValueError(f"Alpha must be between 0 and 1, got {alpha} instead.")
+        
+        if np.any(~np.isfinite(X_array)):
+            raise ValueError("X contains NaN or infinite values.")
+        
+        if np.any(~np.isfinite(y_array)):
+            raise ValueError("y contains NaN or infinite values.")
+            
         self.feature_names = (
             X.columns if hasattr(X, 'columns')
             else feature_names if feature_names is not None
@@ -68,15 +120,38 @@ class LinearRegressionOLS:
             else target_name if target_name is not None
             else "Dependent"
         )
-        self.X, self.y = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
+
+        self.alpha = alpha
+        self.X, self.y = X_array, y_array
         self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
 
-        # Fit    
-        xtx_inv = np.linalg.inv(self.X.T @ self.X)
-        self.theta = xtx_inv @ (self.X.T @ self.y)                               
-        self.intercept, self.coefficients = self.theta[0], self.theta[1:]
+        logging.getLogger(__name__).info(f"Fitting OLS model with {X.shape[0]} observations, {X.shape[1]} features")
+        # Cholesky decomposition fit    
+        xtx = self.X.T @ self.X
+        try:
+            L = np.linalg.cholesky(xtx)
+            self.theta = np.linalg.solve(L.T, np.linalg.solve(L, self.X.T @ self.y))  
+            I = np.eye(xtx.shape[0])
+            self.xtx_inv = np.linalg.solve(L.T, np.linalg.solve(L, I)) 
+        except np.linalg.LinAlgError:
+            raise ValueError(
+            "Matrix X'X is not positive definite. This typically indicates:\n"
+            "- Perfect multicollinearity between features\n"
+            "- Insufficient observations (n < k)\n"
+            "- Constant or duplicate columns in X"
+            )
+        if np.linalg.cond(xtx) > 1e10:
+            warnings.warn(
+                f"X'X matrix is ill-conditioned (cond={np.linalg.cond(xtx):.2e}). "
+                f"Results may be unreliable. Consider:\n"
+                f"- Removing collinear features\n"
+                f"- Scaling features\n"
+                f"- Using regularization",
+                UserWarning
+        )
         
         # Predict
+        self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         y_hat = self.X @ self.theta #self.predict(self.X)
         y_bar = np.mean(self.y) 
         self.residuals = self.y - y_hat
@@ -91,7 +166,11 @@ class LinearRegressionOLS:
         self.rmse = np.sqrt(self.mse)
 
         # Model 
-        self.f_statistic = (self.ess / self.coefficients.shape[0]) / self.mse
+        self.f_statistic = (
+            (self.ess / self.coefficients.shape[0]) / self.mse
+            if self.coefficients.shape[0] != 0
+            else np.inf
+        )
         self.r_squared = 1 - (self.rss / self.tss)
         self.r_squared_adjusted = 1 - (1 - self.r_squared) * (self.X.shape[0] - 1) / self.degrees_freedom
         self.log_likelihood = -self.X.shape[0]/2 * (np.log(2 * np.pi) + np.log(self.rss / self.X.shape[0]) + 1)
@@ -99,7 +178,7 @@ class LinearRegressionOLS:
         self.bic = -2 * self.log_likelihood + self.X.shape[1] * np.log(self.X.shape[0])
 
         # Feature 
-        self.variance_coefficient = self.mse * xtx_inv  # Variance of the coefficients (Covariance matrix)
+        self.variance_coefficient = self.mse * self.xtx_inv  # Variance of the coefficients (Covariance matrix)
         self.std_error_coefficient = np.sqrt(np.diag(self.variance_coefficient))
         self.t_stat_coefficient = self.theta / self.std_error_coefficient
         self.p_value_coefficient = 2 * (1 - t_dist.cdf(abs(self.t_stat_coefficient), self.degrees_freedom))
@@ -111,8 +190,8 @@ class LinearRegressionOLS:
         return self
 
     def predict(self, X, alpha=0.05, return_table=False):
-        if self.theta is None:
-            raise ValueError("Error: Model is not fitted.")        
+        self._model_is_fitted()
+
         if return_table == False:
             return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
     
@@ -138,7 +217,7 @@ class LinearRegressionOLS:
     })
 
     def HypothesisTesting(self, test, hyp, alpha=0.05, critical=1.96):
-
+        self._model_is_fitted()
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
         hypothesis_features = (
             {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])}
@@ -161,8 +240,9 @@ class LinearRegressionOLS:
             f"\nFail to reject the null hypothesis: {prediction.item():.4f} is not statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
             f"\nConclude that outcome of {prediction_features}\ndoes not differ from {hypothesis_features}"
             if abs(t_stat.item()) < critical else
-            f"Reject the null hypothesis: {prediction.item():.4f} is statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
-            f"Conclude that the outcomes of {prediction_features}\ndiffers significantly from {hypothesis_features}"
+            f"Significance Analysis (p > |t|)\n{critical} > |{t_stat.item():.4f}| == {abs(t_stat.item()) < critical}\n"
+            f"\nReject the null hypothesis: {prediction.item():.4f} is statistically different from {hypothesis.item():.4f} at {alpha*100}% level\n"
+            f"\nConclude that the outcomes of {prediction_features}\ndiffers significantly from {hypothesis_features}"
         )
         return (
         {
@@ -179,23 +259,25 @@ class LinearRegressionOLS:
     )
 
     def VarianceInflationFactor(self):
-        if self.theta is None:
-            raise ValueError("Error: Model is not fitted.")
-        
+        self._model_is_fitted()
         X = self.X[:,1:]
         n_features, vif = X.shape[1], []
+
         for i in range(n_features):
-    
             mask = np.ones(n_features, dtype=bool) 
             mask[i] = False
-            
             X_j = X[:, i]                                                                        # Target
             X_other_with_intercept = np.column_stack([np.ones(X[:, mask].shape[0]), X[:, mask]]) # Other Features
 
             # Auxiliary fit
-            theta_aux = np.linalg.inv(X_other_with_intercept.T @ X_other_with_intercept) @ (X_other_with_intercept.T @ X_j)
+            xtx = X_other_with_intercept.T @ X_other_with_intercept
+            theta_aux = np.linalg.solve(xtx, X_other_with_intercept.T @ X_j)
+
             y_hat_aux = X_other_with_intercept @ theta_aux
             tss_aux = np.sum((X_j - np.mean(X_j))**2)
+            if tss_aux < 1e-10:
+                vif.append(np.inf)
+                continue
             rss_aux = np.sum((X_j - y_hat_aux)**2)
             r_squared_aux = 1 - (rss_aux / tss_aux)
             vif.append(1 / (1 - r_squared_aux) if r_squared_aux < 0.9999 else np.inf)
@@ -206,12 +288,10 @@ class LinearRegressionOLS:
     })
 
     def RobustStandardError(self, type="HC3"):
-        X = self.X
-        n, k = X.shape
-        xtx_inv = np.linalg.inv(X.T @ X)
-        residuals = self.residuals.reshape(-1, 1) 
-        h = np.sum(X @ xtx_inv * X, axis=1) # leverage h_ii WITHOUT forming full H = X(X'X)^(-1)X'
-        sr = residuals.flatten()**2
+        self._model_is_fitted()
+        n, k = self.X.shape
+        h = np.sum(self.X @ self.xtx_inv * self.X, axis=1)
+        sr = self.residuals.reshape(-1, 1).flatten()**2
         HC_ = {
             "HC0": lambda sr, n_obs, k_regressors, leverage: sr,
             "HC1": lambda sr, n_obs, k_regressors, leverage: (n_obs / (n_obs - k_regressors)) * sr,
@@ -220,28 +300,23 @@ class LinearRegressionOLS:
         }
         try:
             omega_diagonal = HC_[type](sr, n, k, h)
-            X_omega = X * np.sqrt(omega_diagonal)[:, None]              # Multiply each X row by X*(diagonal weights)^(0.5)
-            robust_cov = xtx_inv @ (X_omega.T @ X_omega) @ xtx_inv      # Sandwich 
-            robust_se = np.sqrt(np.diag(robust_cov))                    # Diagonal extract the var-cov 
+            X_omega = self.X * np.sqrt(omega_diagonal)[:, None]                   # Multiply each X row by X*(diagonal weights)^(0.5)
+            robust_cov = self.xtx_inv @ (X_omega.T @ X_omega) @ self.xtx_inv      # Sandwich 
+            robust_se = np.sqrt(np.diag(robust_cov))                              # Diagonal extract the var-cov 
             robust_t_stat = self.theta / robust_se
 
             return {
             "feature": self.feature_names,
-            #"covariance": robust_cov,
             "robust_se": robust_se,
             "robust_t": robust_t_stat,
-            "robust_p": 2 * (1 - t_dist.cdf(abs(robust_t_stat), self.degrees_freedom))
-            #"type": type
+            "robust_p": 2 * (1 - t_dist.cdf(abs(robust_t_stat), self.degrees_freedom)),
+            #"type": type,
+            #"covariance": robust_cov,
         }
         except KeyError:
             raise ValueError("Select 'HC0', 'HC1', 'HC2', 'HC3'")
 
 
-
-
-'''
-Can print multiple models side by side
-'''
 def RegressionOutput(models, col_width=15, compression=20):
     if not isinstance(models, list):
         models = [models]
