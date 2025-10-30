@@ -7,18 +7,24 @@ def one_hot_encoding(y):
     return encoded_feature
 
 def init_network_params(n_hidden, n_classes, n_features):
+
     weight_1 = torch.randn((n_hidden, n_features), device=device) * torch.sqrt(torch.tensor(2.0 / n_features))
     bias_1 = torch.zeros((n_hidden, 1), device=device)
     
     weight_2 = torch.randn((n_classes, n_hidden), device=device) * torch.sqrt(torch.tensor(2.0 / n_hidden))
     bias_2 = torch.zeros((n_classes, 1), device=device)
     
-    return weight_1, bias_1, weight_2, bias_2
+    return (
+        weight_1,
+        bias_1,
+        weight_2,
+        bias_2,
+)
 
 def forward_prop(weight_1, bias_1, weight_2, bias_2, X):
 
     def ReLU(model):
-        return torch.maximum(torch.zeros_like(model), model)
+        return torch.clamp(model, min=0) #torch.maximum(torch.zeros_like(model), model) # np.maximum(0, model)
     
     def softmax(model):
         e = torch.exp(model - torch.max(model, dim=0, keepdim=True).values)
@@ -30,11 +36,17 @@ def forward_prop(weight_1, bias_1, weight_2, bias_2, X):
     model_layer_2 = weight_2 @ activation_layer_1 + bias_2
     activation_layer_2 = softmax(model_layer_2)
     
-    return model_layer_1, activation_layer_1, model_layer_2, activation_layer_2
+    return (
+        model_layer_1,
+        activation_layer_1,
+        model_layer_2,
+        activation_layer_2
+)
 
 def backward_prop(model_layer_1, activation_layer_1,
                   model_layer_2, activation_layer_2,
-                  weight_1, weight_2, X, y):
+                  weight_1, weight_2, X, y
+    ):
 
     def dydx_ReLU(model):
         return (model > 0).float()
@@ -53,14 +65,20 @@ def backward_prop(model_layer_1, activation_layer_1,
     return d_weight_1, d_bias_1, d_weight_2, d_bias_2
 
 def update_network_params(weight_1, bias_1, weight_2, bias_2,
-                          d_weight_1, d_bias_1, d_weight_2, d_bias_2, lr):
+                          d_weight_1, d_bias_1, d_weight_2, d_bias_2, lr
+                        ):
     
     weight_1 -= lr * d_weight_1
     bias_1   -= lr * d_bias_1    
     weight_2 -= lr * d_weight_2  
     bias_2   -= lr * d_bias_2    
 
-    return weight_1, bias_1, weight_2, bias_2
+    return (
+        weight_1,
+        bias_1,
+        weight_2,
+        bias_2
+)
 
 def predict(activation_layer_2):
     return torch.argmax(activation_layer_2, dim=0)
@@ -106,4 +124,10 @@ def gradient_descent(X, y, n_hidden=None, lr=0.1, n_iters=100):
             training_log['train_acc'].append(training_score)
             print(f"Iteration {i:4d} | Loss: {training_loss:.4f} | Train Score: {training_score:.4f}")
 
-    return weight_1, bias_1, weight_2, bias_2, training_log
+    return (
+        weight_1,
+        bias_1,
+        weight_2,
+        bias_2,
+        training_log
+)
