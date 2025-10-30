@@ -9,5 +9,10 @@
 
 
 !Neural Networks/
-!Neural Networks/number_recognition_network.py
-!Neural Networks/number_recognition_test.ipynb
+!Neural Networks/Number Recognition/
+!Neural Networks/Number Recognition/Numpy Implementation/
+!Neural Networks/Number Recognition/Numpy Implementation/number_recognition_network.py
+!Neural Networks/Number Recognition/Numpy Implementation/number_recognition_test.ipynb
+!Neural Networks/Number Recognition/PyTorch (Acceleration Only)/
+!Neural Networks/Number Recognition/PyTorch (Acceleration Only)/number_recognition_test.ipynb
+!Neural Networks/Number Recognition/PyTorch (Acceleration Only)/number_recognition_network.py
