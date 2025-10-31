@@ -40,12 +40,12 @@ class LinearRegressionOLS:
                 "Model is not fitted. Call 'fit' with arguments "
                 "before using this method."
             )
-    
+
     def __str__(self):
         self._model_is_fitted()
-        return RegressionOutput(self)
-    
-    def feature_summary(self):
+        return summary(self)
+
+    def coefficient_table(self):
         self._model_is_fitted()
         return [
         {
@@ -62,7 +62,7 @@ class LinearRegressionOLS:
         for feature, coefficient, se, t, p, low, high in
         zip(self.feature_names, self.theta, self.std_error_coefficient, self.t_stat_coefficient, self.p_value_coefficient, self.ci_low, self.ci_high)
     ]
-    
+
     def fit(
         self,
         X: np.ndarray,
@@ -71,24 +71,24 @@ class LinearRegressionOLS:
         target_name: Optional[str] = None,
         alpha: float = 0.05
         ) -> 'LinearRegressionOLS':
-        
+
         if X is None or y is None:
             raise ValueError("X and y cannot be None")
-        
+
         X_array, y_array = (np.asarray(X, dtype=float)), np.asarray(y, dtype=float)
 
         if X_array.size == 0 or y_array.size == 0:
             raise ValueError("X and y cannot be empty")
-        
+
         if len(X_array.shape) != 2:
             raise ValueError(f"X must be 2D, got shape {X_array.shape} instead.")
-        
+
         if len(y_array.shape) != 1:
             if len(y_array.shape) == 2 and y_array.shape[1] == 1:
                 y_array = y_array.flatten()
             else:
                 raise ValueError(f"y must be 1D, got shape {y_array.shape} instead.")
-        
+
         if X_array.shape[0] != y_array.shape[0]:
             raise ValueError(
                 f"X and y must have same number of observations. "
@@ -101,13 +101,13 @@ class LinearRegressionOLS:
         )
         if not (0 < alpha < 1):
             raise ValueError(f"Alpha must be between 0 and 1, got {alpha} instead.")
-        
+
         if np.any(~np.isfinite(X_array)):
             raise ValueError("X contains NaN or infinite values.")
-        
+
         if np.any(~np.isfinite(y_array)):
             raise ValueError("y contains NaN or infinite values.")
-            
+
         self.feature_names = (
             X.columns if hasattr(X, 'columns')
             else feature_names if feature_names is not None
@@ -122,13 +122,13 @@ class LinearRegressionOLS:
         self.X, self.y = X_array, y_array
         self.degrees_freedom = self.X.shape[0]-self.X.shape[1]
 
-        # Cholesky decomposition fit    
+        # Cholesky decomposition fit
         xtx = self.X.T @ self.X
         try:
             L = np.linalg.cholesky(xtx)
-            self.theta = np.linalg.solve(L.T, np.linalg.solve(L, self.X.T @ self.y))  
+            self.theta = np.linalg.solve(L.T, np.linalg.solve(L, self.X.T @ self.y))
             I = np.eye(xtx.shape[0])
-            self.xtx_inv = np.linalg.solve(L.T, np.linalg.solve(L, I)) 
+            self.xtx_inv = np.linalg.solve(L.T, np.linalg.solve(L, I))
         except np.linalg.LinAlgError:
             raise ValueError(
             "Matrix X'X is not positive definite. This typically indicates:\n"
@@ -150,19 +150,19 @@ class LinearRegressionOLS:
         # Predict
         self.intercept, self.coefficients = self.theta[0], self.theta[1:]
         y_hat = self.X @ self.theta #self.predict(self.X)
-        y_bar = np.mean(self.y) 
+        y_bar = np.mean(self.y)
         self.residuals = self.y - y_hat
 
         # Squared Residuals
-        self.rss = self.residuals @ self.residuals                
-        self.ess = np.sum((y_hat - y_bar)**2) 
-        self.tss = np.sum((self.y - y_bar)**2)     
+        self.rss = self.residuals @ self.residuals
+        self.ess = np.sum((y_hat - y_bar)**2)
+        self.tss = np.sum((self.y - y_bar)**2)
 
         # Loss
-        self.mse = self.rss / self.degrees_freedom 
+        self.mse = self.rss / self.degrees_freedom
         self.rmse = np.sqrt(self.mse)
 
-        # Model 
+        # Model
         self.f_statistic = (
             (self.ess / self.coefficients.shape[0]) / self.mse
             if self.coefficients.shape[0] > 0 and self.mse > 1e-15
@@ -174,7 +174,7 @@ class LinearRegressionOLS:
         self.aic = -2 * self.log_likelihood + 2 * self.X.shape[1]
         self.bic = -2 * self.log_likelihood + self.X.shape[1] * np.log(self.X.shape[0])
 
-        # Feature 
+        # Feature
         self.variance_coefficient = self.mse * self.xtx_inv  # Variance of the coefficients (Covariance matrix)
         self.std_error_coefficient = np.sqrt(np.diag(self.variance_coefficient))
         self.t_stat_coefficient = self.theta / self.std_error_coefficient
@@ -190,9 +190,9 @@ class LinearRegressionOLS:
         self._model_is_fitted()
         if return_table == False:
             return (np.asarray(X, dtype=float) @ self.coefficients + self.intercept)
-    
+
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], X[0])}
-        X = np.hstack([np.ones((X.shape[0], 1)), X]) 
+        X = np.hstack([np.ones((X.shape[0], 1)), X])
         prediction = X @ self.theta
         se_prediction = np.sqrt((X @ self.variance_coefficient @ X.T)).item()
         t_critical = t_dist.ppf(1 - alpha/2, self.degrees_freedom)
@@ -210,7 +210,7 @@ class LinearRegressionOLS:
             f"ci_high_{alpha}": [np.round(ci_high.item(), 4)],
     })
 
-    def HypothesisTesting(self, test, hyp, alpha=0.05):
+    def hypothesis_testing(self, test, hyp, alpha=0.05):
         self._model_is_fitted()
         critical = np.round(t_dist.ppf(1 - alpha/2, self.degrees_freedom),2)
         prediction_features = {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], test[0])}
@@ -218,15 +218,15 @@ class LinearRegressionOLS:
             {j: f'{i.item():.2f}' for j, i in zip(self.feature_names[1:], hyp[0])}
             if isinstance(hyp, np.ndarray)
             else {f"{self.target}": f"{hyp}"}
-        )                                                 
+        )
         test = np.hstack([np.ones((test.shape[0], 1)), test])
         prediction, hypothesis = test @ self.theta, (
             np.hstack([np.ones((hyp.shape[0], 1)), hyp]) @ self.theta
             if isinstance(hyp, np.ndarray)
             else np.asarray(hyp)
         )
-        se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()            
-        t_stat = (prediction - hypothesis) / se       
+        se = np.sqrt((test @ self.variance_coefficient @ test.T)).item()
+        t_stat = (prediction - hypothesis) / se
         p = 2 * (1 - t_dist.cdf(abs(t_stat), self.degrees_freedom))
 
         result = (
@@ -240,7 +240,7 @@ class LinearRegressionOLS:
         )
         return (
         {
-            "summary": result, 
+            "summary": result,
             "table": {
                 "feature_labels": [prediction_features],
                 "hypothesis_labels": [hypothesis_features],
@@ -252,13 +252,13 @@ class LinearRegressionOLS:
         }
     )
 
-    def VarianceInflationFactor(self):
+    def variance_inflation_factor(self):
         self._model_is_fitted()
         X = self.X[:,1:]
         n_features, vif = X.shape[1], []
 
         for i in range(n_features):
-            mask = np.ones(n_features, dtype=bool) 
+            mask = np.ones(n_features, dtype=bool)
             mask[i] = False
             X_j = X[:, i]                                                                        # Target
             X_other_with_intercept = np.column_stack([np.ones(X[:, mask].shape[0]), X[:, mask]]) # Other Features
@@ -276,11 +276,11 @@ class LinearRegressionOLS:
             vif.append(1 / (1 - r_squared_aux) if r_squared_aux < 0.9999 else np.inf)
 
         return ({
-            'feature': self.feature_names[1:], 
+            'feature': self.feature_names[1:],
             'VIF': np.round(vif, 4)
     })
 
-    def RobustStandardError(self, type="HC3"):
+    def robust_se(self, type="HC3"):
         self._model_is_fitted()
         n, k = self.X.shape
         h = np.sum(self.X @ self.xtx_inv * self.X, axis=1)
@@ -294,8 +294,8 @@ class LinearRegressionOLS:
         try:
             omega_diagonal = HC_[type](sr, n, k, h)
             X_omega = self.X * np.sqrt(omega_diagonal)[:, None]                   # Multiply each X row by X*(diagonal weights)^(0.5)
-            robust_cov = self.xtx_inv @ (X_omega.T @ X_omega) @ self.xtx_inv      # Sandwich 
-            robust_se = np.sqrt(np.diag(robust_cov))                              # Diagonal extract the var-cov 
+            robust_cov = self.xtx_inv @ (X_omega.T @ X_omega) @ self.xtx_inv      # Sandwich
+            robust_se = np.sqrt(np.diag(robust_cov))                              # Diagonal extract the var-cov
             robust_t_stat = self.theta / robust_se
 
             return {
@@ -310,14 +310,14 @@ class LinearRegressionOLS:
             raise ValueError("Select 'HC0', 'HC1', 'HC2', 'HC3'")
 
 
-def RegressionOutput(models, col_width=15, compression=20):
+def summary(models, col_width=15, compression=20):
     if not isinstance(models, list):
         models = [models]
 
     for i, model in enumerate(models):
         if model.theta is None:
             raise ValueError(f"Error: Model {i+1} is not fitted.")
-    
+
     format_length = compression + (len(models)*col_width)
     header = (
         f"\n{"="*format_length}\n"
