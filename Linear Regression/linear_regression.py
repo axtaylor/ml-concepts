@@ -1,9 +1,8 @@
-import numpy as np
-import pandas as pd
-from scipy.stats import t as t_dist
 from dataclasses import dataclass, field
-from typing import Optional, Union, List
+from typing import Optional, List
 import warnings
+import numpy as np
+from scipy.stats import t as t_dist
 
 @dataclass
 class LinearRegressionOLS:
@@ -66,8 +65,8 @@ class LinearRegressionOLS:
     
     def fit(
         self,
-        X: Union[np.ndarray, pd.DataFrame],
-        y: Union[np.ndarray, pd.Series],
+        X: np.ndarray,
+        y: np.ndarray,
         feature_names: Optional[List[str]] = None,
         target_name: Optional[str] = None,
         alpha: float = 0.05
